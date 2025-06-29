@@ -1,65 +1,60 @@
 import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from utils import (
-    fetch_stock_data, calculate_technical_indicators, draw_candlestick_chart,
-    process_portfolio_file, export_chart, compute_correlation, save_config, load_config
-)
+from utils.data_utils import load_data
+from utils.chart_utils import plot_candlestick
+from utils.indicators import add_indicators
+from utils.portfolio_utils import load_portfolio, show_correlation
+import json
+import io
 
-st.set_page_config(layout="wide", page_title="📈 Stock Market Visualizer")
+st.set_page_config(page_title="Stock Market Visualizer", layout="wide")
+st.title("📈 Stock Market Visualizer")
 
-st.title("📊 Stock Market Visualizer")
+with st.sidebar:
+    st.header("Settings")
+    ticker = st.text_input("Stock Ticker", value="AAPL")
+    period = st.selectbox("Data Period", options=["1mo", "3mo", "6mo", "1y", "5y", "max"], index=3)
+    interval = st.selectbox("Interval", options=["1d", "1wk", "1mo"], index=0)
 
-tab1, tab2, tab3 = st.tabs(["📈 Charting", "📂 Portfolio", "⚙️ Configurations"])
+    st.subheader("Indicators")
+    sma_period = st.slider("SMA Period", 5, 100, 20)
+    show_rsi = st.checkbox("Show RSI", value=True)
+    show_bbands = st.checkbox("Show Bollinger Bands", value=True)
 
-with tab1:
-    st.subheader("Stock Chart Visualization")
+    st.subheader("Export")
+    export_format = st.selectbox("Export Format", ["PNG", "HTML"])
+    if st.button("Save Config"):
+        config = {
+            "ticker": ticker, "period": period, "interval": interval,
+            "sma_period": sma_period, "show_rsi": show_rsi, "show_bbands": show_bbands
+        }
+        st.download_button("Download Config", json.dumps(config), file_name="config.json")
 
-    ticker = st.text_input("Enter Stock Ticker (e.g. RELIANCE)", value="RELIANCE")
-    timeframe = st.selectbox("Select Timeframe", ["1mo", "3mo", "6mo", "1y", "5y"])
-    overlays = st.multiselect("Select Indicators", ["SMA", "EMA", "RSI", "Bollinger Bands"])
+data = load_data(ticker, period, interval)
+if data.empty:
+    st.error("No data found. Check ticker or timeframe.")
+else:
+    st.subheader(f"{ticker} Candlestick Chart")
+    fig = plot_candlestick(data, sma_period, show_bbands)
+    st.plotly_chart(fig, use_container_width=True)
 
-    if st.button("Plot Chart"):
-        df = fetch_stock_data(ticker, timeframe)
-        if df is not None:
-            df = calculate_technical_indicators(df, overlays)
-            fig = draw_candlestick_chart(df, overlays, ticker)
-            st.plotly_chart(fig, use_container_width=True)
+    if show_rsi:
+        st.subheader("Relative Strength Index (RSI)")
+        rsi_fig = add_indicators(data, indicator='rsi')
+        st.plotly_chart(rsi_fig, use_container_width=True)
 
-            export_format = st.selectbox("Export Format", ["None", "PNG", "HTML"])
-            if export_format != "None":
-                export_chart(fig, ticker, export_format)
+    if export_format == "PNG":
+        st.download_button("Download PNG", fig.to_image(format="png"), file_name=f"{ticker}.png")
+    else:
+        html_bytes = fig.to_html().encode("utf-8")
+        st.download_button("Download HTML", html_bytes, file_name=f"{ticker}.html")
 
-with tab2:
-    st.subheader("Upload Portfolio File")
+    st.divider()
 
-    file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
-    if file:
-        portfolio = process_portfolio_file(file)
-        st.dataframe(portfolio)
-
-        if st.checkbox("Show Correlation Matrix"):
-            corr_fig = compute_correlation(portfolio)
-            st.plotly_chart(corr_fig, use_container_width=True)
-
-with tab3:
-    st.subheader("Save/Load Your Settings")
-    
-    config_name = st.text_input("Configuration name", value="sample_config")
-    config_file = f"config/{config_name}.json"
-
-    if st.button("💾 Save Config"):
-        save_config({
-            "ticker": ticker,
-            "timeframe": timeframe,
-            "indicators": overlays
-        }, config_file)
-        st.success(f"Configuration saved to {config_file}")
-
-    if st.button("📂 Load Config"):
-        config = load_config(config_file)
-        if config:
-            st.json(config)
-        else:
-            st.error("Config not found")
-
+    st.subheader("📊 Portfolio Upload")
+    uploaded_file = st.file_uploader("Upload CSV or Excel (tickers in first column)", type=["csv", "xlsx"])
+    if uploaded_file:
+        try:
+            tickers = load_portfolio(uploaded_file)
+            show_correlation(tickers, period)
+        except Exception as e:
+            st.error(f"Error processing portfolio: {e}")
