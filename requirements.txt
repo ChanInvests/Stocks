@@ -1,6 +1,8 @@
 streamlit
-plotly
-pandas
-openpyxl
-matplotlib
 yfinance
+pandas
+numpy
+plotly
+openpyxl
+seaborn
+matplotlib
